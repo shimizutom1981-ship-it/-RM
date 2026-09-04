@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Smart Workout Tracker</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    :root {
+      --bg-color: #0f172a;
+      --card-bg: #1e293b;
+      --accent: #3b82f6;
+      --accent-hover: #2563eb;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+      --border: #334155;
+      --highlight: #10b981;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body { background-color: var(--bg-color); color: var(--text); padding: 16px; display: flex; justify-content: center; }
+    .container { width: 100%; max-width: 480px; display: flex; flex-direction: column; gap: 16px; }
+    
+    .card { background-color: var(--card-bg); border-radius: 12px; padding: 16px; border: 1px solid var(--border); }
+    h2 { font-size: 1.1rem; margin-bottom: 8px; color: var(--text-muted); }
+    
+    /* フォーム・入力 */
+    .row { display: flex; gap: 8px; margin-bottom: 10px; align-items: center; }
+    select, input {
+      background: #0f172a; border: 1px solid var(--border); color: var(--text);
+      padding: 10px; border-radius: 8px; font-size: 1rem; width: 100%;
+    }
+    label { font-size: 0.85rem; color: var(--text-muted); display: block; margin-bottom: 4px; }
+    
+    /* 推奨重量ボタン */
+    .recommend-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 8px; }
+    .target-btn {
+      background: #0f172a; border: 1px solid var(--accent); border-radius: 8px;
+      padding: 12px 4px; text-align: center; cursor: pointer; transition: 0.2s;
+    }
+    .target-btn:hover { background: var(--accent); }
+    .target-btn .reps-label { font-size: 0.75rem; color: var(--text-muted); }
+    .target-btn .weight-val { font-size: 1.25rem; font-weight: bold; color: #fff; margin: 4px 0; }
+    .target-btn .action-label { font-size: 0.7rem; color: var(--accent); background: rgba(59, 130, 246, 0.15); padding: 2px 4px; border-radius: 4px; }
+    .target-btn:hover .action-label { color: #fff; background: transparent; }
+
+    /* タイマー */
+    .timer-card { text-align: center; border: 2px solid var(--border); }
+    .timer-card.active { border-color: var(--highlight); }
+    .timer-display { font-size: 2.8rem; font-weight: bold; font-variant-numeric: tabular-nums; margin: 4px 0; }
+    .timer-controls { display: flex; justify-content: center; gap: 8px; }
+    .btn {
+      background: var(--border); color: var(--text); border: none; padding: 8px 14px;
+      border-radius: 6px; cursor: pointer; font-size: 0.9rem;
+    }
+    .btn:hover { opacity: 0.85; }
+
+    /* ログ一覧 */
+    .log-list { list-style: none; max-height: 140px; overflow-y: auto; font-size: 0.9rem; }
+    .log-item { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--border); }
+  </style>
+</head>
+<body>
+
+<div class="container">
+
+  <div class="card">
+    <div class="row">
+      <div style="flex: 2;">
+        <label>種目</label>
+        <select id="exerciseSelect" onchange="loadExerciseData()">
+          <option value="DB Press">ダンベルプレス</option>
+          <option value="Incline DB Press">インクラインDBプレス</option>
+          <option value="Squat">スクワット</option>
+        </select>
+      </div>
+      <div style="flex: 1;">
+        <label>刻み幅(kg)</label>
+        <input type="number" id="weightIncrement" value="2.5" step="0.5" onchange="calculateProjections()">
+      </div>
+    </div>
+    
+    <div style="display: flex; gap: 8px;">
+      <div style="flex: 1;">
+        <label>前回重量 (kg)</label>
+        <input type="number" id="prevWeight" value="30.0" step="0.5" oninput="calculateProjections()">
+      </div>
+      <div style="flex: 1;">
+        <label>前回回数 (reps)</label>
+        <input type="number" id="prevReps" value="8" min="1" max="30" oninput="calculateProjections()">
+      </div>
+    </div>
+    <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 6px;" id="estimated1RMText">推定1RM: -- kg</p>
+  </div>
+
+  <div class="card">
+    <h2>次回目標 (タップで記録＆タイマー起動)</h2>
+    <div class="recommend-grid">
+      <div class="target-btn" onclick="applyAndLog(5, rec5)">
+        <div class="reps-label">筋力重視 (5回)</div>
+        <div class="weight-val" id="val5">--</div>
+        <span class="action-label">記録＆3分休</span>
+      </div>
+      <div class="target-btn" onclick="applyAndLog(10, rec10)">
+        <div class="reps-label">筋肥大 (10回)</div>
+        <div class="weight-val" id="val10">--</div>
+        <span class="action-label">記録＆2分休</span>
+      </div>
+      <div class="target-btn" onclick="applyAndLog(15, rec15)">
+        <div class="reps-label">筋持久力 (15回)</div>
+        <div class="weight-val" id="val15">--</div>
+        <span class="action-label">記録＆90秒休</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="card timer-card" id="timerCard">
+    <div style="font-size: 0.85rem; color: var(--text-muted);">REST INTERVAL</div>
+    <div class="timer-display" id="timerDisplay">00:00</div>
+    <div class="timer-controls">
+      <button class="btn" onclick="addTimerSeconds(30)">+30秒</button>
+      <button class="btn" onclick="stopTimer()">スキップ</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>推定1RM推移 (kg)</h2>
+    <canvas id="rmChart" style="max-height: 180px;"></canvas>
+  </div>
+
+  <div class="card">
+    <h2>記録履歴</h2>
+    <ul class="log-list" id="logList"></ul>
+  </div>
+
+</div>
+
+<script>
+  let rec5 = 0, rec10 = 0, rec15 = 0;
+  let timerInterval = null;
+  let remainingSec = 0;
+  let chart = null;
+
+  // --- 計算ロジック ---
+  // Epley式: 1RM = Weight * (1 + Reps / 30)
+  function calc1RM(weight, reps) {
+    return reps === 1 ? weight : weight * (1 + reps / 30);
+  }
+
+  // 1RMから特定レップの重量を逆算
+  function calcWeightFrom1RM(oneRM, targetReps) {
+    return oneRM / (1 + targetReps / 30);
+  }
+
+  // 器具の刻み幅へ丸め込み
+  function roundToStep(weight, step) {
+    return Math.round(weight / step) * step;
+  }
+
+  function calculateProjections() {
+    const w = parseFloat(document.getElementById('prevWeight').value) || 0;
+    const r = parseInt(document.getElementById('prevReps').value) || 0;
+    const step = parseFloat(document.getElementById('weightIncrement').value) || 1.0;
+
+    if (w <= 0 || r <= 0) return;
+
+    const oneRM = calc1RM(w, r);
+    document.getElementById('estimated1RMText').innerText = `推定1RM: ${oneRM.toFixed(1)} kg`;
+
+    rec5 = roundToStep(calcWeightFrom1RM(oneRM, 5), step);
+    rec10 = roundToStep(calcWeightFrom1RM(oneRM, 10), step);
+    rec15 = roundToStep(calcWeightFrom1RM(oneRM, 15), step);
+
+    document.getElementById('val5').innerText = `${rec5}kg`;
+    document.getElementById('val10').innerText = `${rec10}kg`;
+    document.getElementById('val15').innerText = `${rec15}kg`;
+  }
+
+  // --- 記録 & タイマー自動開始 ---
+  function applyAndLog(reps, weight) {
+    const exercise = document.getElementById('exerciseSelect').value;
+    const oneRM = parseFloat(calc1RM(weight, reps).toFixed(1));
+    const now = new Date();
+    const dateStr = `${now.getMonth()+1}/${now.getDate()} ${now.getHours()}:${String(now.getMinutes()).padStart(2, '0')}`;
+
+    const newRecord = {
+      date: dateStr,
+      exercise: exercise,
+      weight: weight,
+      reps: reps,
+      oneRM: oneRM
+    };
+
+    saveLog(newRecord);
+    updateUI();
+
+    // タイマー起動 (5回: 180s, 10回: 120s, 15回: 90s)
+    let restSec = 120;
+    if (reps <= 5) restSec = 180;
+    else if (reps >= 15) restSec = 90;
+
+    startTimer(restSec);
+  }
+
+  // --- タイマー機能 ---
+  function startTimer(seconds) {
+    clearInterval(timerInterval);
+    remainingSec = seconds;
+    const card = document.getElementById('timerCard');
+    card.classList.add('active');
+
+    updateTimerDisplay();
+
+    timerInterval = setInterval(() => {
+      remainingSec--;
+      updateTimerDisplay();
+
+      if (remainingSec <= 0) {
+        clearInterval(timerInterval);
+        card.classList.remove('active');
+        if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+        alert("休憩終了！次のセットを開始してください。");
+      }
+    }, 1000);
+  }
+
+  function updateTimerDisplay() {
+    const mins = Math.floor(remainingSec / 60);
+    const secs = remainingSec % 60;
+    document.getElementById('timerDisplay').innerText = 
+      `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+  }
+
+  function addTimerSeconds(sec) {
+    remainingSec += sec;
+    updateTimerDisplay();
+  }
+
+  function stopTimer() {
+    clearInterval(timerInterval);
+    remainingSec = 0;
+    updateTimerDisplay();
+    document.getElementById('timerCard').classList.remove('active');
+  }
+
+  // --- ストレージ & グラフ描画 ---
+  function getLogs() {
+    return JSON.parse(localStorage.getItem('workout_logs') || '[]');
+  }
+
+  function saveLog(record) {
+    const logs = getLogs();
+    logs.push(record);
+    localStorage.setItem('workout_logs', JSON.stringify(logs));
+  }
+
+  function loadExerciseData() {
+    const exercise = document.getElementById('exerciseSelect').value;
+    const logs = getLogs().filter(l => l.exercise === exercise);
+    
+    // 直近ログがあれば入力欄を更新
+    if (logs.length > 0) {
+      const latest = logs[logs.length - 1];
+      document.getElementById('prevWeight').value = latest.weight;
+      document.getElementById('prevReps').value = latest.reps;
+    }
+    calculateProjections();
+    renderLogsAndChart();
+  }
+
+  function renderLogsAndChart() {
+    const currentEx = document.getElementById('exerciseSelect').value;
+    const logs = getLogs().filter(l => l.exercise === currentEx);
+    
+    // ログリスト
+    const listEl = document.getElementById('logList');
+    listEl.innerHTML = '';
+    logs.slice().reverse().forEach(log => {
+      const li = document.createElement('li');
+      li.className = 'log-item';
+      li.innerHTML = `<span>${log.date}</span> <span>${log.weight}kg × ${log.reps}回</span> <span style="color:var(--text-muted);">(1RM: ${log.oneRM})</span>`;
+      listEl.appendChild(li);
+    });
+
+    // グラフ更新
+    const labels = logs.map(l => l.date);
+    const data1RM = logs.map(l => l.oneRM);
+
+    if (chart) chart.destroy();
+    const ctx = document.getElementById('rmChart').getContext('2d');
+    chart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: labels,
+        datasets: [{
+          label: '推定1RM',
+          data: data1RM,
+          borderColor: '#3b82f6',
+          backgroundColor: 'rgba(59, 130, 246, 0.1)',
+          tension: 0.2,
+          fill: true
+        }]
+      },
+      options: {
+        responsive: true,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { ticks: { color: '#94a3b8' }, grid: { color: '#334155' } },
+          y: { ticks: { color: '#94a3b8' }, grid: { color: '#334155' } }
+        }
+      }
+    });
+  }
+
+  function updateUI() {
+    calculateProjections();
+    renderLogsAndChart();
+  }
+
+  // 初期化
+  window.onload = () => {
+    calculateProjections();
+    loadExerciseData();
+  };
+</script>
+
+</body>
+</html>
