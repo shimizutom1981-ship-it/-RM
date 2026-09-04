@@ -3,7 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Smart Workout Tracker</title>
+  <title>TargetLoad - 1RM Calc & Log</title>
+  <!-- Chart.js CDN -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
     :root {
@@ -15,73 +16,107 @@
       --text-muted: #94a3b8;
       --border: #334155;
       --highlight: #10b981;
+      --danger: #ef4444;
     }
     * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
     body { background-color: var(--bg-color); color: var(--text); padding: 16px; display: flex; justify-content: center; }
-    .container { width: 100%; max-width: 480px; display: flex; flex-direction: column; gap: 16px; }
+    .container { width: 100%; max-width: 480px; display: flex; flex-direction: column; gap: 14px; }
     
     .card { background-color: var(--card-bg); border-radius: 12px; padding: 16px; border: 1px solid var(--border); }
-    h2 { font-size: 1.1rem; margin-bottom: 8px; color: var(--text-muted); }
+    h2 { font-size: 1.05rem; margin-bottom: 8px; color: var(--text-muted); display: flex; justify-content: space-between; align-items: center; }
     
-    /* フォーム・入力 */
-    .row { display: flex; gap: 8px; margin-bottom: 10px; align-items: center; }
+    /* 入力フォーム */
+    .row { display: flex; gap: 8px; margin-bottom: 8px; align-items: center; }
     select, input {
       background: #0f172a; border: 1px solid var(--border); color: var(--text);
       padding: 10px; border-radius: 8px; font-size: 1rem; width: 100%;
     }
-    label { font-size: 0.85rem; color: var(--text-muted); display: block; margin-bottom: 4px; }
+    label { font-size: 0.8rem; color: var(--text-muted); display: block; margin-bottom: 4px; }
     
+    /* 単位切り替えスイッチ */
+    .unit-switch { display: flex; background: #0f172a; border-radius: 8px; border: 1px solid var(--border); overflow: hidden; }
+    .unit-btn {
+      flex: 1; padding: 8px; text-align: center; cursor: pointer; font-size: 0.85rem; font-weight: bold; color: var(--text-muted); border: none; background: transparent;
+    }
+    .unit-btn.active { background: var(--accent); color: #fff; }
+
     /* 推奨重量ボタン */
-    .recommend-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 8px; }
+    .recommend-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 6px; }
     .target-btn {
       background: #0f172a; border: 1px solid var(--accent); border-radius: 8px;
-      padding: 12px 4px; text-align: center; cursor: pointer; transition: 0.2s;
+      padding: 12px 4px; text-align: center; cursor: pointer; transition: 0.15s;
     }
     .target-btn:hover { background: var(--accent); }
-    .target-btn .reps-label { font-size: 0.75rem; color: var(--text-muted); }
-    .target-btn .weight-val { font-size: 1.25rem; font-weight: bold; color: #fff; margin: 4px 0; }
-    .target-btn .action-label { font-size: 0.7rem; color: var(--accent); background: rgba(59, 130, 246, 0.15); padding: 2px 4px; border-radius: 4px; }
+    .target-btn .reps-label { font-size: 0.72rem; color: var(--text-muted); }
+    .target-btn .weight-val { font-size: 1.2rem; font-weight: bold; color: #fff; margin: 4px 0; }
+    .target-btn .action-label { font-size: 0.65rem; color: var(--accent); background: rgba(59, 130, 246, 0.15); padding: 2px 4px; border-radius: 4px; }
     .target-btn:hover .action-label { color: #fff; background: transparent; }
 
     /* タイマー */
     .timer-card { text-align: center; border: 2px solid var(--border); }
     .timer-card.active { border-color: var(--highlight); }
-    .timer-display { font-size: 2.8rem; font-weight: bold; font-variant-numeric: tabular-nums; margin: 4px 0; }
+    .timer-display { font-size: 2.6rem; font-weight: bold; font-variant-numeric: tabular-nums; margin: 4px 0; }
     .timer-controls { display: flex; justify-content: center; gap: 8px; }
     .btn {
       background: var(--border); color: var(--text); border: none; padding: 8px 14px;
-      border-radius: 6px; cursor: pointer; font-size: 0.9rem;
+      border-radius: 6px; cursor: pointer; font-size: 0.85rem;
     }
     .btn:hover { opacity: 0.85; }
+    .btn-sm { padding: 4px 8px; font-size: 0.75rem; }
+
+    /* 設定アコーディオン */
+    .settings-panel { display: none; margin-top: 10px; border-top: 1px solid var(--border); padding-top: 10px; }
+    .settings-panel.open { display: block; }
+    .exercise-edit-item { display: flex; gap: 6px; margin-bottom: 6px; align-items: center; }
 
     /* ログ一覧 */
-    .log-list { list-style: none; max-height: 140px; overflow-y: auto; font-size: 0.9rem; }
-    .log-item { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--border); }
+    .log-list { list-style: none; max-height: 120px; overflow-y: auto; font-size: 0.85rem; }
+    .log-item { display: flex; justify-content: space-between; padding: 5px 0; border-bottom: 1px solid var(--border); }
   </style>
 </head>
 <body>
 
 <div class="container">
 
+  <!-- 種目選択 ＆ 設定トグル -->
   <div class="card">
-    <div class="row">
-      <div style="flex: 2;">
-        <label>種目</label>
-        <select id="exerciseSelect" onchange="loadExerciseData()">
-          <option value="DB Press">ダンベルプレス</option>
-          <option value="Incline DB Press">インクラインDBプレス</option>
-          <option value="Squat">スクワット</option>
-        </select>
+    <div class="row" style="justify-content: space-between; margin-bottom: 10px;">
+      <h1 style="font-size: 1.1rem;">TargetLoad</h1>
+      <button class="btn btn-sm" onclick="toggleSettings()">⚙ 種目編集 / 単位</button>
+    </div>
+
+    <!-- 設定展開エリア -->
+    <div class="settings-panel" id="settingsPanel">
+      <div class="row">
+        <div style="flex: 1;">
+          <label>表示単位</label>
+          <div class="unit-switch">
+            <button class="unit-btn active" id="btnKg" onclick="setUnit('kg')">kg</button>
+            <button class="unit-btn" id="btnLb" onclick="setUnit('lb')">lb</button>
+          </div>
+        </div>
+        <div style="flex: 1;">
+          <label>器具の刻み幅 (<span class="unit-text">kg</span>)</label>
+          <input type="number" id="weightIncrement" value="2.5" step="0.5" onchange="saveCurrentExerciseConfig(); calculateProjections();">
+        </div>
       </div>
-      <div style="flex: 1;">
-        <label>刻み幅(kg)</label>
-        <input type="number" id="weightIncrement" value="2.5" step="0.5" onchange="calculateProjections()">
+
+      <div style="margin-top: 10px;">
+        <label>種目名の変更（全10枠）</label>
+        <div id="exerciseEditList"></div>
       </div>
     </div>
-    
-    <div style="display: flex; gap: 8px;">
+
+    <!-- 種目選択ドロップダウン -->
+    <div style="margin-top: 6px;">
+      <label>トレーニング種目</label>
+      <select id="exerciseSelect" onchange="onExerciseChange()"></select>
+    </div>
+
+    <!-- 実績入力部 -->
+    <div class="row" style="margin-top: 8px;">
       <div style="flex: 1;">
-        <label>前回重量 (kg)</label>
+        <label>前回重量 (<span class="unit-text">kg</span>)</label>
         <input type="number" id="prevWeight" value="30.0" step="0.5" oninput="calculateProjections()">
       </div>
       <div style="flex: 1;">
@@ -89,32 +124,34 @@
         <input type="number" id="prevReps" value="8" min="1" max="30" oninput="calculateProjections()">
       </div>
     </div>
-    <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 6px;" id="estimated1RMText">推定1RM: -- kg</p>
+    <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 4px;" id="estimated1RMText">推定1RM: --</p>
   </div>
 
+  <!-- 推奨重量ワンタップ記録 -->
   <div class="card">
-    <h2>次回目標 (タップで記録＆タイマー起動)</h2>
+    <h2>次回目標 (タップで記録＆タイマー始動)</h2>
     <div class="recommend-grid">
       <div class="target-btn" onclick="applyAndLog(5, rec5)">
         <div class="reps-label">筋力重視 (5回)</div>
         <div class="weight-val" id="val5">--</div>
-        <span class="action-label">記録＆3分休</span>
+        <span class="action-label">3分休憩</span>
       </div>
       <div class="target-btn" onclick="applyAndLog(10, rec10)">
         <div class="reps-label">筋肥大 (10回)</div>
         <div class="weight-val" id="val10">--</div>
-        <span class="action-label">記録＆2分休</span>
+        <span class="action-label">2分休憩</span>
       </div>
       <div class="target-btn" onclick="applyAndLog(15, rec15)">
         <div class="reps-label">筋持久力 (15回)</div>
         <div class="weight-val" id="val15">--</div>
-        <span class="action-label">記録＆90秒休</span>
+        <span class="action-label">90秒休憩</span>
       </div>
     </div>
   </div>
 
+  <!-- インターバルタイマー -->
   <div class="card timer-card" id="timerCard">
-    <div style="font-size: 0.85rem; color: var(--text-muted);">REST INTERVAL</div>
+    <div style="font-size: 0.8rem; color: var(--text-muted);">REST INTERVAL</div>
     <div class="timer-display" id="timerDisplay">00:00</div>
     <div class="timer-controls">
       <button class="btn" onclick="addTimerSeconds(30)">+30秒</button>
@@ -122,38 +159,159 @@
     </div>
   </div>
 
+  <!-- 成長推移グラフ -->
   <div class="card">
-    <h2>推定1RM推移 (kg)</h2>
+    <h2>推定1RM推移 (<span class="unit-text">kg</span>)</h2>
     <canvas id="rmChart" style="max-height: 180px;"></canvas>
   </div>
 
+  <!-- ログ -->
   <div class="card">
-    <h2>記録履歴</h2>
+    <h2>この種目の履歴</h2>
     <ul class="log-list" id="logList"></ul>
   </div>
 
 </div>
 
 <script>
+  const DEFAULT_EXERCISES = [
+    { id: 1, name: "ダンベルプレス", stepKg: 2.5, stepLb: 5.0 },
+    { id: 2, name: "インクラインDBプレス", stepKg: 2.5, stepLb: 5.0 },
+    { id: 3, name: "ワンハンドローイング", stepKg: 2.5, stepLb: 5.0 },
+    { id: 4, name: "サイドレイズ", stepKg: 1.0, stepLb: 2.5 },
+    { id: 5, name: "アームカール", stepKg: 1.0, stepLb: 2.5 },
+    { id: 6, name: "フレンチプレス", stepKg: 1.0, stepLb: 2.5 },
+    { id: 7, name: "ブルガリアンスクワット", stepKg: 2.5, stepLb: 5.0 },
+    { id: 8, name: "ルーマニアンデッドリフト", stepKg: 2.5, stepLb: 5.0 },
+    { id: 9, name: "スタンディングカーフ", stepKg: 2.5, stepLb: 5.0 },
+    { id: 10, name: "種目10（未設定）", stepKg: 2.5, stepLb: 5.0 }
+  ];
+
+  let exercises = [];
+  let currentUnit = 'kg'; // 'kg' or 'lb'
   let rec5 = 0, rec10 = 0, rec15 = 0;
   let timerInterval = null;
   let remainingSec = 0;
   let chart = null;
 
+  // --- 初期化 ---
+  function init() {
+    exercises = JSON.parse(localStorage.getItem('user_exercises')) || DEFAULT_EXERCISES;
+    currentUnit = localStorage.getItem('user_unit') || 'kg';
+
+    updateUnitUI();
+    renderExerciseSelect();
+    renderExerciseEditor();
+    onExerciseChange();
+  }
+
+  // --- 単位切り替え ---
+  function setUnit(unit) {
+    currentUnit = unit;
+    localStorage.setItem('user_unit', unit);
+    updateUnitUI();
+    
+    // 現在の種目の推奨ステップ幅に切り替え
+    const currentEx = getCurrentExercise();
+    document.getElementById('weightIncrement').value = (currentUnit === 'kg') ? currentEx.stepKg : currentEx.stepLb;
+    
+    calculateProjections();
+    renderLogsAndChart();
+  }
+
+  function updateUnitUI() {
+    document.querySelectorAll('.unit-text').forEach(el => el.innerText = currentUnit);
+    document.getElementById('btnKg').className = `unit-btn ${currentUnit === 'kg' ? 'active' : ''}`;
+    document.getElementById('btnLb').className = `unit-btn ${currentUnit === 'lb' ? 'active' : ''}`;
+  }
+
+  // --- 種目管理 ---
+  function renderExerciseSelect() {
+    const select = document.getElementById('exerciseSelect');
+    const selectedId = select.value || exercises[0].id;
+    select.innerHTML = '';
+    exercises.forEach(ex => {
+      const opt = document.createElement('option');
+      opt.value = ex.id;
+      opt.innerText = ex.name;
+      select.appendChild(opt);
+    });
+    select.value = selectedId;
+  }
+
+  function renderExerciseEditor() {
+    const container = document.getElementById('exerciseEditList');
+    container.innerHTML = '';
+    exercises.forEach(ex => {
+      const row = document.createElement('div');
+      row.className = 'exercise-edit-item';
+      row.innerHTML = `
+        <span style="font-size:0.8rem; width:22px; color:var(--text-muted);">${ex.id}.</span>
+        <input type="text" value="${ex.name}" onchange="updateExerciseName(${ex.id}, this.value)">
+      `;
+      container.appendChild(row);
+    });
+  }
+
+  function updateExerciseName(id, newName) {
+    const ex = exercises.find(e => e.id === id);
+    if (ex) {
+      ex.name = newName.trim() || `種目 ${id}`;
+      saveExercises();
+      renderExerciseSelect();
+    }
+  }
+
+  function saveExercises() {
+    localStorage.setItem('user_exercises', JSON.stringify(exercises));
+  }
+
+  function getCurrentExercise() {
+    const id = parseInt(document.getElementById('exerciseSelect').value) || 1;
+    return exercises.find(e => e.id === id) || exercises[0];
+  }
+
+  function onExerciseChange() {
+    const ex = getCurrentExercise();
+    document.getElementById('weightIncrement').value = (currentUnit === 'kg') ? ex.stepKg : ex.stepLb;
+
+    const logs = getLogs().filter(l => l.exerciseId === ex.id && l.unit === currentUnit);
+    if (logs.length > 0) {
+      const latest = logs[logs.length - 1];
+      document.getElementById('prevWeight').value = latest.weight;
+      document.getElementById('prevReps').value = latest.reps;
+    } else {
+      document.getElementById('prevWeight').value = (currentUnit === 'kg') ? 30.0 : 65.0;
+      document.getElementById('prevReps').value = 8;
+    }
+    calculateProjections();
+    renderLogsAndChart();
+  }
+
+  function saveCurrentExerciseConfig() {
+    const ex = getCurrentExercise();
+    const val = parseFloat(document.getElementById('weightIncrement').value) || 1.0;
+    if (currentUnit === 'kg') ex.stepKg = val;
+    else ex.stepLb = val;
+    saveExercises();
+  }
+
+  function toggleSettings() {
+    const p = document.getElementById('settingsPanel');
+    p.classList.toggle('open');
+  }
+
   // --- 計算ロジック ---
-  // Epley式: 1RM = Weight * (1 + Reps / 30)
   function calc1RM(weight, reps) {
     return reps === 1 ? weight : weight * (1 + reps / 30);
   }
 
-  // 1RMから特定レップの重量を逆算
   function calcWeightFrom1RM(oneRM, targetReps) {
     return oneRM / (1 + targetReps / 30);
   }
 
-  // 器具の刻み幅へ丸め込み
   function roundToStep(weight, step) {
-    return Math.round(weight / step) * step;
+    return (Math.round(weight / step) * step);
   }
 
   function calculateProjections() {
@@ -164,36 +322,38 @@
     if (w <= 0 || r <= 0) return;
 
     const oneRM = calc1RM(w, r);
-    document.getElementById('estimated1RMText').innerText = `推定1RM: ${oneRM.toFixed(1)} kg`;
+    document.getElementById('estimated1RMText').innerText = `推定1RM: ${oneRM.toFixed(1)} ${currentUnit}`;
 
     rec5 = roundToStep(calcWeightFrom1RM(oneRM, 5), step);
     rec10 = roundToStep(calcWeightFrom1RM(oneRM, 10), step);
     rec15 = roundToStep(calcWeightFrom1RM(oneRM, 15), step);
 
-    document.getElementById('val5').innerText = `${rec5}kg`;
-    document.getElementById('val10').innerText = `${rec10}kg`;
-    document.getElementById('val15').innerText = `${rec15}kg`;
+    // 小数点第1位までに整形（端数がなければ整数表示）
+    const fmt = n => parseFloat(n.toFixed(2));
+    document.getElementById('val5').innerText = `${fmt(rec5)}${currentUnit}`;
+    document.getElementById('val10').innerText = `${fmt(rec10)}${currentUnit}`;
+    document.getElementById('val15').innerText = `${fmt(rec15)}${currentUnit}`;
   }
 
-  // --- 記録 & タイマー自動開始 ---
+  // --- 記録 & タイマー連動 ---
   function applyAndLog(reps, weight) {
-    const exercise = document.getElementById('exerciseSelect').value;
+    const ex = getCurrentExercise();
     const oneRM = parseFloat(calc1RM(weight, reps).toFixed(1));
     const now = new Date();
     const dateStr = `${now.getMonth()+1}/${now.getDate()} ${now.getHours()}:${String(now.getMinutes()).padStart(2, '0')}`;
 
     const newRecord = {
       date: dateStr,
-      exercise: exercise,
-      weight: weight,
+      exerciseId: ex.id,
+      weight: parseFloat(weight.toFixed(2)),
       reps: reps,
+      unit: currentUnit,
       oneRM: oneRM
     };
 
     saveLog(newRecord);
-    updateUI();
+    renderLogsAndChart();
 
-    // タイマー起動 (5回: 180s, 10回: 120s, 15回: 90s)
     let restSec = 120;
     if (reps <= 5) restSec = 180;
     else if (reps >= 15) restSec = 90;
@@ -201,19 +361,17 @@
     startTimer(restSec);
   }
 
-  // --- タイマー機能 ---
+  // --- タイマー ---
   function startTimer(seconds) {
     clearInterval(timerInterval);
     remainingSec = seconds;
     const card = document.getElementById('timerCard');
     card.classList.add('active');
-
     updateTimerDisplay();
 
     timerInterval = setInterval(() => {
       remainingSec--;
       updateTimerDisplay();
-
       if (remainingSec <= 0) {
         clearInterval(timerInterval);
         card.classList.remove('active');
@@ -242,7 +400,7 @@
     document.getElementById('timerCard').classList.remove('active');
   }
 
-  // --- ストレージ & グラフ描画 ---
+  // --- ストレージ & グラフ ---
   function getLogs() {
     return JSON.parse(localStorage.getItem('workout_logs') || '[]');
   }
@@ -253,31 +411,18 @@
     localStorage.setItem('workout_logs', JSON.stringify(logs));
   }
 
-  function loadExerciseData() {
-    const exercise = document.getElementById('exerciseSelect').value;
-    const logs = getLogs().filter(l => l.exercise === exercise);
-    
-    // 直近ログがあれば入力欄を更新
-    if (logs.length > 0) {
-      const latest = logs[logs.length - 1];
-      document.getElementById('prevWeight').value = latest.weight;
-      document.getElementById('prevReps').value = latest.reps;
-    }
-    calculateProjections();
-    renderLogsAndChart();
-  }
-
   function renderLogsAndChart() {
-    const currentEx = document.getElementById('exerciseSelect').value;
-    const logs = getLogs().filter(l => l.exercise === currentEx);
+    const ex = getCurrentExercise();
+    // 選択中の種目かつ選択中の単位に一致するログを抽出
+    const logs = getLogs().filter(l => l.exerciseId === ex.id && l.unit === currentUnit);
     
-    // ログリスト
+    // 履歴リスト描画
     const listEl = document.getElementById('logList');
     listEl.innerHTML = '';
     logs.slice().reverse().forEach(log => {
       const li = document.createElement('li');
       li.className = 'log-item';
-      li.innerHTML = `<span>${log.date}</span> <span>${log.weight}kg × ${log.reps}回</span> <span style="color:var(--text-muted);">(1RM: ${log.oneRM})</span>`;
+      li.innerHTML = `<span>${log.date}</span> <span>${log.weight}${log.unit} × ${log.reps}回</span> <span style="color:var(--text-muted);">(1RM: ${log.oneRM})</span>`;
       listEl.appendChild(li);
     });
 
@@ -292,7 +437,7 @@
       data: {
         labels: labels,
         datasets: [{
-          label: '推定1RM',
+          label: `推定1RM (${currentUnit})`,
           data: data1RM,
           borderColor: '#3b82f6',
           backgroundColor: 'rgba(59, 130, 246, 0.1)',
@@ -311,16 +456,7 @@
     });
   }
 
-  function updateUI() {
-    calculateProjections();
-    renderLogsAndChart();
-  }
-
-  // 初期化
-  window.onload = () => {
-    calculateProjections();
-    loadExerciseData();
-  };
+  window.onload = init;
 </script>
 
 </body>
