@@ -63,6 +63,10 @@
     }
     .btn:hover { opacity: 0.85; }
     .btn-sm { padding: 4px 8px; font-size: 0.75rem; }
+    .btn-danger { background: #991b1b; }
+    .btn-danger:hover { background: var(--danger); }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-primary:hover { background: var(--accent-hover); }
 
     /* 設定アコーディオン */
     .settings-panel { display: none; margin-top: 10px; border-top: 1px solid var(--border); padding-top: 10px; }
@@ -70,8 +74,20 @@
     .exercise-edit-item { display: flex; gap: 6px; margin-bottom: 6px; align-items: center; }
 
     /* ログ一覧 */
-    .log-list { list-style: none; max-height: 120px; overflow-y: auto; font-size: 0.85rem; }
-    .log-item { display: flex; justify-content: space-between; padding: 5px 0; border-bottom: 1px solid var(--border); }
+    .log-list { list-style: none; max-height: 180px; overflow-y: auto; font-size: 0.85rem; }
+    .log-item { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--border); }
+    .log-actions { display: flex; gap: 6px; }
+
+    /* 編集モーダル */
+    .modal-overlay {
+      display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(0, 0, 0, 0.7); z-index: 100; justify-content: center; align-items: center; padding: 16px;
+    }
+    .modal-overlay.open { display: flex; }
+    .modal-box {
+      background: var(--card-bg); border: 1px solid var(--border); border-radius: 12px;
+      padding: 20px; width: 100%; max-width: 360px; box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+    }
   </style>
 </head>
 <body>
@@ -151,7 +167,10 @@
 
   <!-- インターバルタイマー -->
   <div class="card timer-card" id="timerCard">
-    <div style="font-size: 0.8rem; color: var(--text-muted);">REST INTERVAL</div>
+    <div style="display: flex; justify-content: space-between; align-items: center; padding: 0 4px;">
+      <span style="font-size: 0.8rem; color: var(--text-muted);">REST INTERVAL</span>
+      <button class="btn btn-sm" onclick="playAlarmSound()" title="音量確認用">🔔 音テスト</button>
+    </div>
     <div class="timer-display" id="timerDisplay">00:00</div>
     <div class="timer-controls">
       <button class="btn" onclick="addTimerSeconds(30)">+30秒</button>
@@ -165,12 +184,38 @@
     <canvas id="rmChart" style="max-height: 180px;"></canvas>
   </div>
 
-  <!-- ログ -->
+  <!-- 履歴 ＆ 編集エリア -->
   <div class="card">
-    <h2>この種目の履歴</h2>
+    <h2>この種目の履歴 (編集可能)</h2>
     <ul class="log-list" id="logList"></ul>
   </div>
 
+</div>
+
+<!-- データ編集モーダル -->
+<div class="modal-overlay" id="editModal">
+  <div class="modal-box">
+    <h3 style="font-size: 1rem; margin-bottom: 12px;">記録の修正</h3>
+    <input type="hidden" id="editLogId">
+    <div style="margin-bottom: 8px;">
+      <label>日時</label>
+      <input type="text" id="editLogDate">
+    </div>
+    <div class="row">
+      <div style="flex: 1;">
+        <label>重量 (<span class="unit-text">kg</span>)</label>
+        <input type="number" id="editLogWeight" step="0.5">
+      </div>
+      <div style="flex: 1;">
+        <label>回数 (reps)</label>
+        <input type="number" id="editLogReps" min="1" max="50">
+      </div>
+    </div>
+    <div style="display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px;">
+      <button class="btn" onclick="closeEditModal()">キャンセル</button>
+      <button class="btn btn-primary" onclick="saveEditedLog()">保存する</button>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -188,21 +233,77 @@
   ];
 
   let exercises = [];
-  let currentUnit = 'kg'; // 'kg' or 'lb'
+  let currentUnit = 'kg';
   let rec5 = 0, rec10 = 0, rec15 = 0;
   let timerInterval = null;
   let remainingSec = 0;
   let chart = null;
+
+  // Web Audio API
+  let audioCtx = null;
+
+  function initAudio() {
+    if (!audioCtx) {
+      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+      if (AudioContextClass) audioCtx = new AudioContextClass();
+    }
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  }
+
+  function playAlarmSound() {
+    initAudio();
+    if (!audioCtx) return;
+
+    const beeps = [
+      { time: 0.0, dur: 0.12, freq: 880 },
+      { time: 0.18, dur: 0.12, freq: 880 },
+      { time: 0.36, dur: 0.35, freq: 1174.66 }
+    ];
+
+    const now = audioCtx.currentTime;
+    beeps.forEach(b => {
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(b.freq, now + b.time);
+      gain.gain.setValueAtTime(0.3, now + b.time);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + b.time + b.dur);
+
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start(now + b.time);
+      osc.stop(now + b.time + b.dur);
+    });
+  }
 
   // --- 初期化 ---
   function init() {
     exercises = JSON.parse(localStorage.getItem('user_exercises')) || DEFAULT_EXERCISES;
     currentUnit = localStorage.getItem('user_unit') || 'kg';
 
+    // 既存ログに一意なIDが付与されていない場合の補正
+    ensureLogIds();
+
     updateUnitUI();
     renderExerciseSelect();
     renderExerciseEditor();
     onExerciseChange();
+
+    document.body.addEventListener('touchstart', initAudio, { once: true });
+    document.body.addEventListener('click', initAudio, { once: true });
+  }
+
+  function ensureLogIds() {
+    const logs = getLogs();
+    let updated = false;
+    logs.forEach(l => {
+      if (!l.id) {
+        l.id = 'log_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
+        updated = true;
+      }
+    });
+    if (updated) localStorage.setItem('workout_logs', JSON.stringify(logs));
   }
 
   // --- 単位切り替え ---
@@ -211,10 +312,10 @@
     localStorage.setItem('user_unit', unit);
     updateUnitUI();
     
-    // 現在の種目の推奨ステップ幅に切り替え
     const currentEx = getCurrentExercise();
     document.getElementById('weightIncrement').value = (currentUnit === 'kg') ? currentEx.stepKg : currentEx.stepLb;
     
+    syncLatestInputs();
     calculateProjections();
     renderLogsAndChart();
   }
@@ -271,10 +372,8 @@
     return exercises.find(e => e.id === id) || exercises[0];
   }
 
-  function onExerciseChange() {
+  function syncLatestInputs() {
     const ex = getCurrentExercise();
-    document.getElementById('weightIncrement').value = (currentUnit === 'kg') ? ex.stepKg : ex.stepLb;
-
     const logs = getLogs().filter(l => l.exerciseId === ex.id && l.unit === currentUnit);
     if (logs.length > 0) {
       const latest = logs[logs.length - 1];
@@ -284,6 +383,13 @@
       document.getElementById('prevWeight').value = (currentUnit === 'kg') ? 30.0 : 65.0;
       document.getElementById('prevReps').value = 8;
     }
+  }
+
+  function onExerciseChange() {
+    const ex = getCurrentExercise();
+    document.getElementById('weightIncrement').value = (currentUnit === 'kg') ? ex.stepKg : ex.stepLb;
+
+    syncLatestInputs();
     calculateProjections();
     renderLogsAndChart();
   }
@@ -328,7 +434,6 @@
     rec10 = roundToStep(calcWeightFrom1RM(oneRM, 10), step);
     rec15 = roundToStep(calcWeightFrom1RM(oneRM, 15), step);
 
-    // 小数点第1位までに整形（端数がなければ整数表示）
     const fmt = n => parseFloat(n.toFixed(2));
     document.getElementById('val5').innerText = `${fmt(rec5)}${currentUnit}`;
     document.getElementById('val10').innerText = `${fmt(rec10)}${currentUnit}`;
@@ -337,12 +442,14 @@
 
   // --- 記録 & タイマー連動 ---
   function applyAndLog(reps, weight) {
+    initAudio();
     const ex = getCurrentExercise();
     const oneRM = parseFloat(calc1RM(weight, reps).toFixed(1));
     const now = new Date();
     const dateStr = `${now.getMonth()+1}/${now.getDate()} ${now.getHours()}:${String(now.getMinutes()).padStart(2, '0')}`;
 
     const newRecord = {
+      id: 'log_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6),
       date: dateStr,
       exerciseId: ex.id,
       weight: parseFloat(weight.toFixed(2)),
@@ -352,6 +459,8 @@
     };
 
     saveLog(newRecord);
+    syncLatestInputs();
+    calculateProjections();
     renderLogsAndChart();
 
     let restSec = 120;
@@ -375,8 +484,8 @@
       if (remainingSec <= 0) {
         clearInterval(timerInterval);
         card.classList.remove('active');
-        if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
-        alert("休憩終了！次のセットを開始してください。");
+        playAlarmSound();
+        if (navigator.vibrate) navigator.vibrate([300, 150, 300, 150, 500]);
       }
     }, 1000);
   }
@@ -400,7 +509,7 @@
     document.getElementById('timerCard').classList.remove('active');
   }
 
-  // --- ストレージ & グラフ ---
+  // --- ストレージ操作 ---
   function getLogs() {
     return JSON.parse(localStorage.getItem('workout_logs') || '[]');
   }
@@ -411,18 +520,85 @@
     localStorage.setItem('workout_logs', JSON.stringify(logs));
   }
 
+  // --- ログの編集・削除機能 ---
+  function openEditModal(logId) {
+    const logs = getLogs();
+    const log = logs.find(l => l.id === logId);
+    if (!log) return;
+
+    document.getElementById('editLogId').value = log.id;
+    document.getElementById('editLogDate').value = log.date;
+    document.getElementById('editLogWeight').value = log.weight;
+    document.getElementById('editLogReps').value = log.reps;
+
+    document.getElementById('editModal').classList.add('open');
+  }
+
+  function closeEditModal() {
+    document.getElementById('editModal').classList.remove('open');
+  }
+
+  function saveEditedLog() {
+    const id = document.getElementById('editLogId').value;
+    const date = document.getElementById('editLogDate').value;
+    const weight = parseFloat(document.getElementById('editLogWeight').value) || 0;
+    const reps = parseInt(document.getElementById('editLogReps').value) || 0;
+
+    if (weight <= 0 || reps <= 0) {
+      alert("有効な重量と回数を入力してください");
+      return;
+    }
+
+    const logs = getLogs();
+    const logIndex = logs.findIndex(l => l.id === id);
+    if (logIndex !== -1) {
+      logs[logIndex].date = date;
+      logs[logIndex].weight = weight;
+      logs[logIndex].reps = reps;
+      logs[logIndex].oneRM = parseFloat(calc1RM(weight, reps).toFixed(1));
+      
+      localStorage.setItem('workout_logs', JSON.stringify(logs));
+      closeEditModal();
+      
+      syncLatestInputs();
+      calculateProjections();
+      renderLogsAndChart();
+    }
+  }
+
+  function deleteLog(logId) {
+    if (!confirm("このログを削除しますか？")) return;
+    let logs = getLogs();
+    logs = logs.filter(l => l.id !== logId);
+    localStorage.setItem('workout_logs', JSON.stringify(logs));
+    
+    syncLatestInputs();
+    calculateProjections();
+    renderLogsAndChart();
+  }
+
+  // --- レンダリング（履歴リスト ＆ グラフ） ---
   function renderLogsAndChart() {
     const ex = getCurrentExercise();
-    // 選択中の種目かつ選択中の単位に一致するログを抽出
     const logs = getLogs().filter(l => l.exerciseId === ex.id && l.unit === currentUnit);
     
-    // 履歴リスト描画
+    // 履歴リストの描画（編集・削除ボタン付き）
     const listEl = document.getElementById('logList');
     listEl.innerHTML = '';
     logs.slice().reverse().forEach(log => {
       const li = document.createElement('li');
       li.className = 'log-item';
-      li.innerHTML = `<span>${log.date}</span> <span>${log.weight}${log.unit} × ${log.reps}回</span> <span style="color:var(--text-muted);">(1RM: ${log.oneRM})</span>`;
+      li.innerHTML = `
+        <div>
+          <span style="font-size:0.75rem; color:var(--text-muted); display:block;">${log.date}</span>
+          <span><strong>${log.weight}${log.unit}</strong> × ${log.reps}回</span>
+          <span style="color:var(--accent); font-size:0.8rem; margin-left:4px;">(1RM: ${log.oneRM})</span>
+        </div>
+        <div class="log-actions">
+          <button class="btn btn-sm" onclick="openEditModal('${log.id}')">✏️ 編集</button>
+          <button class="btn btn-sm btn-danger" onclick="deleteLog('${log.id}')">🗑</button>
+        </div>
+      `;
       listEl.appendChild(li);
     });
 
